@@ -5,12 +5,11 @@ from __future__ import annotations
 import os
 import tempfile
 import threading
-import time
 import urllib.error
 import webbrowser
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import QObject, Qt, QTimer, Signal, Slot
 from PySide6.QtWidgets import QDialog, QLabel, QMessageBox, QProgressBar, QVBoxLayout, QWidget
 
 from paths import APP_NAME, EXE_NAME
@@ -25,6 +24,17 @@ from updater import (
     schedule_apply_update,
     validate_zip_file,
 )
+
+
+class _UpdateSignals(QObject):
+    """워커 스레드 → 메인 스레드 UI 갱신용."""
+
+    show_dialog = Signal(object)
+    progress = Signal(int, int)
+    download_done = Signal(str, str)
+    download_failed = Signal(str)
+    check_failed = Signal(str)
+    up_to_date = Signal()
 
 
 def schedule_update_check(
@@ -42,6 +52,8 @@ def schedule_update_check(
     if not version_url.strip():
         return
 
+    bridge = _UpdateSignals(parent)
+
     def log(msg: str) -> None:
         if log_callback:
             try:
@@ -49,28 +61,43 @@ def schedule_update_check(
             except Exception:
                 pass
 
+    @Slot()
+    def on_up_to_date() -> None:
+        if not silent:
+            QMessageBox.information(parent, "업데이트", "현재 최신 버전입니다.")
+
+    @Slot(str)
+    def on_check_failed(msg: str) -> None:
+        if not silent:
+            QMessageBox.warning(parent, "업데이트", msg)
+        log(f"[업데이트] 확인 오류: {msg}")
+
+    @Slot(object)
+    def on_show_dialog(info: object) -> None:
+        _show_dialog(
+            parent,
+            info,
+            current_version,
+            app_name,
+            exe_name,
+            zip_inner_folder,
+            log,
+        )
+
+    bridge.show_dialog.connect(on_show_dialog)
+    bridge.up_to_date.connect(on_up_to_date)
+    bridge.check_failed.connect(on_check_failed)
+
     def worker() -> None:
         try:
             info = check_for_update(version_url, current_version, app_name=app_name)
         except Exception as exc:
-            if not silent:
-                QTimer.singleShot(0, parent, lambda: QMessageBox.warning(parent, "업데이트", str(exc)))
-            log(f"[업데이트] 확인 오류: {exc}")
+            bridge.check_failed.emit(str(exc))
             return
         if info is not None:
-            QTimer.singleShot(
-                0,
-                parent,
-                lambda: _show_dialog(
-                    parent, info, current_version, app_name, exe_name, zip_inner_folder, log,
-                ),
-            )
+            bridge.show_dialog.emit(info)
         elif not silent:
-            QTimer.singleShot(
-                0,
-                parent,
-                lambda: QMessageBox.information(parent, "업데이트", "현재 최신 버전입니다."),
-            )
+            bridge.up_to_date.emit()
         else:
             payload = fetch_version_payload(version_url, f"{app_name}/{current_version}")
             if payload is None:
@@ -128,62 +155,76 @@ def _auto_update(parent: QWidget, info: UpdateInfo, app_name: str, exe_name: str
     bar.setRange(0, 100)
     layout.addWidget(bar)
 
+    bridge = _UpdateSignals(dialog)
+
+    @Slot(int, int)
     def on_progress(done: int, total: int) -> None:
         if total > 0:
             pct = min(int(done * 100 / total), 100)
-            QTimer.singleShot(0, lambda: (bar.setValue(pct), status.setText(f"다운로드 {pct}%")))
+            bar.setValue(pct)
+            status.setText(f"다운로드 {pct}%")
         else:
-            QTimer.singleShot(0, lambda: status.setText("다운로드 중..."))
+            status.setText("다운로드 중...")
+
+    @Slot(str, str)
+    def on_download_done(zip_path_str: str, used_url: str) -> None:
+        zip_path = Path(zip_path_str)
+        log_path = get_update_log_path()
+        try:
+            status.setText("설치 준비 중... 잠시 후 다시 실행됩니다.")
+            dialog.repaint()
+            schedule_apply_update(
+                zip_path,
+                exe_name=exe_name,
+                zip_inner_folder=zip_inner_folder,
+                app_slug=app_name,
+            )
+            log(
+                f"[업데이트] 다운로드 완료 ({zip_path.stat().st_size // 1024 // 1024} MB) via {used_url}"
+            )
+            log(f"[업데이트] 설치 스크립트 실행 (로그: {log_path})")
+        except (RuntimeError, OSError) as exc:
+            QMessageBox.critical(parent, "업데이트 실패", str(exc))
+            dialog.reject()
+            log(f"[업데이트] 설치 준비 실패: {exc}")
+            return
+
+        dialog.accept()
+        QTimer.singleShot(300, lambda: os._exit(0))
+
+    @Slot(str)
+    def on_download_failed(detail: str) -> None:
+        dialog.reject()
+        QMessageBox.critical(
+            parent,
+            "업데이트 실패",
+            f"다운로드 실패:\n{detail}\n\n브라우저에서 직접 받아 주세요.",
+        )
+        log(f"[업데이트] 다운로드 실패: {detail}")
+
+    bridge.progress.connect(on_progress)
+    bridge.download_done.connect(on_download_done)
+    bridge.download_failed.connect(on_download_failed)
 
     def worker() -> None:
         zip_path = Path(tempfile.gettempdir()) / f"{app_name}-{info.version}.zip"
-        log_path = get_update_log_path()
         try:
             log(f"[업데이트] 다운로드 시작: {info.version}")
             urls = list(info.download_urls) if info.download_urls else [info.url]
+
+            def on_progress_cb(done: int, total: int) -> None:
+                bridge.progress.emit(done, total)
+
             used_url = download_file_with_fallbacks(
                 urls,
                 zip_path,
                 user_agent=f"{app_name}/{info.version}",
-                on_progress=on_progress,
+                on_progress=on_progress_cb,
             )
             validate_zip_file(zip_path, min_bytes=1024 * 1024)
-            log(f"[업데이트] 다운로드 완료 ({zip_path.stat().st_size // 1024 // 1024} MB) via {used_url}")
+            bridge.download_done.emit(str(zip_path), used_url)
         except (urllib.error.URLError, TimeoutError, OSError, ValueError) as exc:
-            detail = format_network_error(exc)
-            QTimer.singleShot(0, dialog.close)
-            QTimer.singleShot(
-                0,
-                lambda: QMessageBox.critical(
-                    parent,
-                    "업데이트 실패",
-                    f"다운로드 실패:\n{detail}\n\n브라우저에서 직접 받아 주세요.",
-                ),
-            )
-            log(f"[업데이트] 다운로드 실패: {exc}")
-            return
-
-        def finish() -> None:
-            try:
-                status.setText("설치 준비 중... 잠시 후 다시 실행됩니다.")
-                dialog.repaint()
-                schedule_apply_update(
-                    zip_path,
-                    exe_name=exe_name,
-                    zip_inner_folder=zip_inner_folder,
-                    app_slug=app_name,
-                )
-                log(f"[업데이트] 설치 스크립트 실행 (로그: {log_path})")
-            except (RuntimeError, OSError) as exc:
-                QMessageBox.critical(parent, "업데이트 실패", str(exc))
-                dialog.close()
-                log(f"[업데이트] 설치 준비 실패: {exc}")
-                return
-            dialog.close()
-            time.sleep(1.5)
-            os._exit(0)
-
-        QTimer.singleShot(0, finish)
+            bridge.download_failed.emit(format_network_error(exc))
 
     threading.Thread(target=worker, daemon=True).start()
     dialog.exec()
