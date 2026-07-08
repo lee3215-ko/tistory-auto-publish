@@ -1,5 +1,5 @@
 ﻿{
-    "version":  "2.0.6",
+    "version":  "2.0.8",
     "url":  "https://github.com/lee3215-ko/tistory-auto-publish/releases/latest/download/TistoryPoster.zip",
-    "notes":  "발행 완료/실패 시 원고를 발행완료·발행실패 폴더로 자동 이동"
+    "notes":  "exe 크래시 수정(업데이트 로그 스레드 안전), 실행 로그 탭 분리, 계정 관리 테이블 높이 확대"
 }

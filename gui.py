@@ -4,7 +4,7 @@ import webbrowser
 from datetime import datetime
 from pathlib import Path
 
-from PySide6.QtCore import QEvent, QSettings, Qt
+from PySide6.QtCore import QEvent, QSettings, Qt, QThread, QTimer, Signal
 from PySide6.QtGui import QColor, QFont, QIcon, QKeySequence
 from PySide6.QtWidgets import (
     QApplication,
@@ -21,7 +21,6 @@ from PySide6.QtWidgets import (
     QPlainTextEdit,
     QProgressBar,
     QPushButton,
-    QSplitter,
     QStyledItemDelegate,
     QTableWidget,
     QTableWidgetItem,
@@ -60,6 +59,7 @@ class GroupSeparatorDelegate(QStyledItemDelegate):
 
 
 class TistoryPosterApp(QMainWindow):
+    log_message = Signal(str)
     _test_worker = None
     _post_worker = None
 
@@ -72,6 +72,7 @@ class TistoryPosterApp(QMainWindow):
 
         self.acc_mgr = AccountManager()
         self.settings = QSettings(APP_NAME, APP_NAME)
+        self.log_message.connect(self._append_log_impl)
         self._build_ui()
         self._load_accounts()
         self._load_saved_paths()
@@ -87,6 +88,10 @@ class TistoryPosterApp(QMainWindow):
         )
 
     def _append_log(self, msg):
+        """어느 스레드에서든 안전하게 호출 가능."""
+        self.log_message.emit(str(msg))
+
+    def _append_log_impl(self, msg):
         ts = datetime.now().strftime("%H:%M:%S")
         text = str(msg)
         # 이미 [HH:MM:SS] 형태의 타임스탬프가 붙어 있으면 중복 추가하지 않음
@@ -108,12 +113,15 @@ class TistoryPosterApp(QMainWindow):
         self.tabs = QTabWidget()
         self.tistory_tab = QWidget()
         self.velog_tab = QWidget()
+        self.log_tab = QWidget()
         self.tabs.addTab(self.tistory_tab, "  티스토리  ")
         self.tabs.addTab(self.velog_tab, "  벨로그  ")
+        self.tabs.addTab(self.log_tab, "  실행 로그  ")
         main_layout.addWidget(self.tabs, stretch=1)
 
         self._build_tistory_tab()
         self._build_velog_tab()
+        self._build_log_tab()
 
         self.status_label = QLabel()
         self.status_label.setObjectName("StatusBar")
@@ -165,7 +173,7 @@ class TistoryPosterApp(QMainWindow):
         self.acc_table = QTableWidget()
         self.acc_table.setColumnCount(7)
         self.acc_table.setHorizontalHeaderLabels(["상태", "아이디", "비밀번호", "블로그 주소", "원고 파일", "완료일시", "발행 URL"])
-        self.acc_table.setMinimumHeight(360)
+        self.acc_table.setMinimumHeight(640)
         self.acc_table.horizontalHeader().setSectionResizeMode(QHeaderView.Interactive)
         self.acc_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
         self.acc_table.setColumnWidth(1, 230)
@@ -180,7 +188,7 @@ class TistoryPosterApp(QMainWindow):
         self.acc_table.cellDoubleClicked.connect(self._open_published_url)
         self.acc_table.setItemDelegate(GroupSeparatorDelegate(self.acc_table))
         self.acc_table.installEventFilter(self)
-        acc_v.addWidget(self.acc_table)
+        acc_v.addWidget(self.acc_table, stretch=1)
 
         acc_form = QHBoxLayout()
         self.inp_id = QLineEdit()
@@ -224,13 +232,10 @@ class TistoryPosterApp(QMainWindow):
         acc_form.addWidget(btn_del)
         acc_v.addLayout(acc_form)
 
-        layout.addWidget(acc_group, stretch=3)
+        layout.addWidget(acc_group, stretch=10)
 
-        # === 중앙: 원고/이미지 설정 + 로그 ===
-        center_splitter = QSplitter(Qt.Horizontal)
-        settings_widget = QWidget()
-        settings_v = QVBoxLayout(settings_widget)
-        settings_v.setContentsMargins(0, 0, 0, 0)
+        settings_group = QGroupBox("배포 설정")
+        settings_v = QVBoxLayout(settings_group)
 
         img_h = QHBoxLayout()
         self.inp_image = QLineEdit()
@@ -249,28 +254,7 @@ class TistoryPosterApp(QMainWindow):
         img_h.addWidget(btn_img_folder)
         settings_v.addLayout(img_h)
 
-        # 오른쪽: 로그 & 진행률
-        log_widget = QWidget()
-        log_v = QVBoxLayout(log_widget)
-        log_v.setContentsMargins(0, 0, 0, 0)
-
-        log_v.addWidget(QLabel("실행 로그"))
-        self.log_view = QPlainTextEdit()
-        self.log_view.setReadOnly(True)
-        self.log_view.setFont(QFont("Consolas", 10))
-        self.log_view.setMinimumHeight(200)
-        log_v.addWidget(self.log_view, stretch=1)
-
-        self.progress = QProgressBar()
-        self.progress.setRange(0, 100)
-        self.progress.setValue(0)
-        log_v.addWidget(QLabel("전체 진행률"))
-        log_v.addWidget(self.progress)
-
-        center_splitter.addWidget(settings_widget)
-        center_splitter.addWidget(log_widget)
-        center_splitter.setSizes([620, 780])
-        layout.addWidget(center_splitter, stretch=2)
+        layout.addWidget(settings_group, stretch=0)
 
         # === 하단: API 키 + 실행 버튼 ===
         api_h = QHBoxLayout()
@@ -310,6 +294,33 @@ class TistoryPosterApp(QMainWindow):
         ctrl_h.addWidget(btn_stop)
         ctrl_h.addWidget(btn_start)
         layout.addLayout(ctrl_h)
+
+    def _build_log_tab(self):
+        layout = QVBoxLayout(self.log_tab)
+        layout.setContentsMargins(8, 8, 8, 8)
+        layout.setSpacing(10)
+
+        self.log_view = QPlainTextEdit()
+        self.log_view.setReadOnly(True)
+        self.log_view.setFont(QFont("Consolas", 10))
+
+        top_row = QHBoxLayout()
+        top_row.addWidget(QLabel("배포·업데이트·계정 작업 기록"))
+        top_row.addStretch()
+        btn_clear = QPushButton("로그 지우기")
+        btn_clear.clicked.connect(self.log_view.clear)
+        top_row.addWidget(btn_clear)
+        layout.addLayout(top_row)
+
+        layout.addWidget(self.log_view, stretch=1)
+
+        progress_row = QHBoxLayout()
+        progress_row.addWidget(QLabel("전체 진행률"))
+        self.progress = QProgressBar()
+        self.progress.setRange(0, 100)
+        self.progress.setValue(0)
+        progress_row.addWidget(self.progress, stretch=1)
+        layout.addLayout(progress_row)
 
     def _build_velog_tab(self):
         layout = QVBoxLayout(self.velog_tab)
@@ -633,6 +644,7 @@ class TistoryPosterApp(QMainWindow):
                 return
         self.progress.setValue(0)
         self.log_view.clear()
+        self.tabs.setCurrentWidget(self.log_tab)
         if getattr(self, "_skipped_failed_count", 0):
             self._append_log(
                 f"[건너뜀] 실패 표시 계정 {self._skipped_failed_count}개 — 원고 변경 전까지 재시도하지 않습니다."
@@ -660,6 +672,7 @@ class TistoryPosterApp(QMainWindow):
             QMessageBox.warning(self, "계정 없음", "계정을 먼저 추가하세요.")
             return
         self.log_view.clear()
+        self.tabs.setCurrentWidget(self.log_tab)
         self._append_log("[테스트] 첫 번째 계정 로그인 테스트 시작...")
         self._test_worker = PosterWorker(
             accounts=[accounts[0]],
@@ -866,6 +879,25 @@ class TistoryPosterApp(QMainWindow):
 
 
 def main():
+    import traceback
+
+    from paths import get_data_dir
+
+    def _write_crash_log(text: str) -> None:
+        try:
+            crash_log = get_data_dir() / "crash.log"
+            with crash_log.open("a", encoding="utf-8") as handle:
+                handle.write(f"\n[{datetime.now():%Y-%m-%d %H:%M:%S}]\n{text}\n")
+        except OSError:
+            pass
+
+    def _exception_hook(exc_type, exc, tb):
+        text = "".join(traceback.format_exception(exc_type, exc, tb))
+        _write_crash_log(text)
+        sys.__excepthook__(exc_type, exc, tb)
+
+    sys.excepthook = _exception_hook
+
     app = QApplication(sys.argv)
     apply_theme(app)
     icon_path = get_icon_path()

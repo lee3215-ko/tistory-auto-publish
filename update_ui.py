@@ -8,7 +8,7 @@ import urllib.error
 import webbrowser
 from pathlib import Path
 
-from PySide6.QtCore import QObject, Qt, QTimer, Signal, Slot
+from PySide6.QtCore import QObject, Qt, QThread, QTimer, Signal, Slot
 from PySide6.QtWidgets import QDialog, QLabel, QMessageBox, QProgressBar, QVBoxLayout, QWidget
 
 from paths import APP_NAME, EXE_NAME
@@ -54,13 +54,26 @@ def schedule_update_check(
         return
 
     bridge = _UpdateSignals(parent)
+    parent._update_check_bridge = bridge
 
     def log(msg: str) -> None:
-        if log_callback:
+        if not log_callback:
+            return
+
+        def emit_log() -> None:
             try:
                 log_callback(msg)
             except Exception:
                 pass
+
+        @Slot()
+        def emit_log_slot() -> None:
+            emit_log()
+
+        if QThread.currentThread() == parent.thread():
+            emit_log()
+        else:
+            QTimer.singleShot(0, parent, emit_log_slot)
 
     @Slot()
     def on_up_to_date() -> None:
