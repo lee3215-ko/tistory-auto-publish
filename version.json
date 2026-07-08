@@ -1,5 +1,5 @@
 ﻿{
-    "version":  "2.0.5",
+    "version":  "2.0.6",
     "url":  "https://github.com/lee3215-ko/tistory-auto-publish/releases/latest/download/TistoryPoster.zip",
-    "notes":  "업데이트 zip 임시폴더 삭제 문제 수정 (LOCALAPPDATA 저장 + 워커에서 압축 해제)"
+    "notes":  "발행 완료/실패 시 원고를 발행완료·발행실패 폴더로 자동 이동"
 }

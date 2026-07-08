@@ -34,6 +34,7 @@ from PySide6.QtWidgets import (
 from gui_workers import PosterWorker, VelogLoginWorker
 from paths import APP_NAME, APP_VERSION, EXE_NAME, UPDATE_VERSION_URL, get_icon_path, is_admin_mode
 from src.account_manager import Account, AccountManager
+from src.article_file import move_article_after_publish
 from ui_theme import COLORS, apply_theme
 from update_ui import check_update_manual, schedule_update_check
 
@@ -688,6 +689,20 @@ class TistoryPosterApp(QMainWindow):
         accounts = self.acc_mgr.load()
         if 0 <= row < len(accounts):
             acc = accounts[row]
+            article_path = getattr(acc, "article_path", "")
+            if article_path:
+                try:
+                    moved = move_article_after_publish(
+                        article_path,
+                        success=not error and bool(url),
+                    )
+                    if moved and moved != article_path:
+                        acc.article_path = moved
+                        label = "발행완료" if not error and url else "발행실패"
+                        self._append_log(f"[원고 이동] #{row+1} → {label} 폴더: {Path(moved).name}")
+                except OSError as exc:
+                    self._append_log(f"[원고 이동 실패] #{row+1}: {exc}")
+
             if not error and url:
                 acc.published_url = url
                 acc.published_at = published_at or datetime.now().strftime("%Y-%m-%d %H:%M")
@@ -698,6 +713,7 @@ class TistoryPosterApp(QMainWindow):
             elif error:
                 acc.publish_error = error
                 self.acc_mgr.save(accounts)
+                self._load_accounts()
                 self._mark_account_row_failed(row, error)
                 self._append_log(f"[계정 실패] #{row+1} → {error}")
 
