@@ -1,0 +1,189 @@
+"""PySide6 업데이트 확인·다운로드 다이얼로그."""
+
+from __future__ import annotations
+
+import os
+import tempfile
+import threading
+import time
+import urllib.error
+import webbrowser
+from pathlib import Path
+
+from PySide6.QtCore import Qt, QTimer
+from PySide6.QtWidgets import QDialog, QLabel, QMessageBox, QProgressBar, QVBoxLayout, QWidget
+
+from paths import APP_NAME, EXE_NAME
+from updater import (
+    UpdateInfo,
+    can_auto_update,
+    check_for_update,
+    download_file_with_fallbacks,
+    fetch_version_payload,
+    format_network_error,
+    get_update_log_path,
+    schedule_apply_update,
+    validate_zip_file,
+)
+
+
+def schedule_update_check(
+    parent: QWidget,
+    *,
+    version_url: str,
+    current_version: str,
+    app_name: str = APP_NAME,
+    exe_name: str = EXE_NAME,
+    delay_ms: int = 2000,
+    zip_inner_folder: str | None = None,
+    log_callback=None,
+    silent: bool = True,
+) -> None:
+    if not version_url.strip():
+        return
+
+    def log(msg: str) -> None:
+        if log_callback:
+            try:
+                log_callback(msg)
+            except Exception:
+                pass
+
+    def worker() -> None:
+        try:
+            info = check_for_update(version_url, current_version, app_name=app_name)
+        except Exception as exc:
+            if not silent:
+                QTimer.singleShot(0, parent, lambda: QMessageBox.warning(parent, "업데이트", str(exc)))
+            log(f"[업데이트] 확인 오류: {exc}")
+            return
+        if info is not None:
+            QTimer.singleShot(
+                0,
+                parent,
+                lambda: _show_dialog(
+                    parent, info, current_version, app_name, exe_name, zip_inner_folder, log,
+                ),
+            )
+        elif not silent:
+            QTimer.singleShot(
+                0,
+                parent,
+                lambda: QMessageBox.information(parent, "업데이트", "현재 최신 버전입니다."),
+            )
+        else:
+            payload = fetch_version_payload(version_url, f"{app_name}/{current_version}")
+            if payload is None:
+                log("[업데이트] version.json 조회 실패 (네트워크 또는 GitHub 접근 확인)")
+
+    QTimer.singleShot(delay_ms, lambda: threading.Thread(target=worker, daemon=True).start())
+
+
+def check_update_manual(parent: QWidget, **kwargs) -> None:
+    schedule_update_check(parent, silent=False, delay_ms=0, **kwargs)
+
+
+def _show_dialog(
+    parent: QWidget,
+    info: UpdateInfo,
+    current_version: str,
+    app_name: str,
+    exe_name: str,
+    zip_inner_folder: str | None,
+    log,
+) -> None:
+    message = f"새 버전 {info.version}이 있습니다.\n(현재: {current_version})"
+    if info.notes:
+        message += f"\n\n{info.notes}"
+
+    if can_auto_update() and info.url:
+        message += "\n\n「예」= 자동 업데이트 후 재실행\n「아니오」= 브라우저에서 받기"
+        reply = QMessageBox.question(
+            parent,
+            "업데이트",
+            message,
+            QMessageBox.Yes | QMessageBox.No | QMessageBox.Cancel,
+        )
+        if reply == QMessageBox.Yes:
+            _auto_update(parent, info, app_name, exe_name, zip_inner_folder, log)
+        elif reply == QMessageBox.No:
+            webbrowser.open(info.url)
+        return
+
+    message += "\n\nzip을 받아 설치 폴더에 덮어쓴 뒤 다시 실행하세요.\n다운로드 페이지를 열까요?"
+    if QMessageBox.question(parent, "업데이트", message) == QMessageBox.Yes and info.url:
+        webbrowser.open(info.url)
+
+
+def _auto_update(parent: QWidget, info: UpdateInfo, app_name: str, exe_name: str, zip_inner_folder, log):
+    dialog = QDialog(parent)
+    dialog.setWindowTitle("업데이트 중")
+    dialog.setFixedSize(400, 130)
+    dialog.setWindowModality(Qt.ApplicationModal)
+
+    layout = QVBoxLayout(dialog)
+    status = QLabel("다운로드 중...")
+    layout.addWidget(status)
+    bar = QProgressBar()
+    bar.setRange(0, 100)
+    layout.addWidget(bar)
+
+    def on_progress(done: int, total: int) -> None:
+        if total > 0:
+            pct = min(int(done * 100 / total), 100)
+            QTimer.singleShot(0, lambda: (bar.setValue(pct), status.setText(f"다운로드 {pct}%")))
+        else:
+            QTimer.singleShot(0, lambda: status.setText("다운로드 중..."))
+
+    def worker() -> None:
+        zip_path = Path(tempfile.gettempdir()) / f"{app_name}-{info.version}.zip"
+        log_path = get_update_log_path()
+        try:
+            log(f"[업데이트] 다운로드 시작: {info.version}")
+            urls = list(info.download_urls) if info.download_urls else [info.url]
+            used_url = download_file_with_fallbacks(
+                urls,
+                zip_path,
+                user_agent=f"{app_name}/{info.version}",
+                on_progress=on_progress,
+            )
+            validate_zip_file(zip_path, min_bytes=1024 * 1024)
+            log(f"[업데이트] 다운로드 완료 ({zip_path.stat().st_size // 1024 // 1024} MB) via {used_url}")
+        except (urllib.error.URLError, TimeoutError, OSError, ValueError) as exc:
+            detail = format_network_error(exc)
+            QTimer.singleShot(0, dialog.close)
+            QTimer.singleShot(
+                0,
+                lambda: QMessageBox.critical(
+                    parent,
+                    "업데이트 실패",
+                    f"다운로드 실패:\n{detail}\n\n브라우저에서 직접 받아 주세요.",
+                ),
+            )
+            log(f"[업데이트] 다운로드 실패: {exc}")
+            return
+
+        def finish() -> None:
+            try:
+                status.setText("설치 준비 중... 잠시 후 다시 실행됩니다.")
+                dialog.repaint()
+                schedule_apply_update(
+                    zip_path,
+                    exe_name=exe_name,
+                    zip_inner_folder=zip_inner_folder,
+                    app_slug=app_name,
+                )
+                log(f"[업데이트] 설치 스크립트 실행 (로그: {log_path})")
+            except (RuntimeError, OSError) as exc:
+                QMessageBox.critical(parent, "업데이트 실패", str(exc))
+                dialog.close()
+                log(f"[업데이트] 설치 준비 실패: {exc}")
+                return
+            dialog.close()
+            time.sleep(1.5)
+            os._exit(0)
+
+        QTimer.singleShot(0, finish)
+
+    threading.Thread(target=worker, daemon=True).start()
+    dialog.exec()

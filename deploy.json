@@ -1,0 +1,17 @@
+﻿{
+  "github_owner": "lee3215-ko",
+  "github_repo": "tistory-auto-publish",
+  "release_asset": "TistoryPoster.zip",
+  "default_bump": "patch",
+  "app_display_name": "티스토리 자동배포",
+  "version": {
+    "file": "paths.py",
+    "variable": "APP_VERSION"
+  },
+  "build": {
+    "script": "build.bat",
+    "dist_dir": "release/TistoryPoster"
+  },
+  "git_add": ["README.md", "paths.py", "gui.py", "gui_workers.py", "run_gui.py", "updater.py", "update_ui.py", "ui_theme.py", "build.bat", "build.spec", "requirements.txt", "version.json", "assets", "src", ".gitignore"]
+}
+

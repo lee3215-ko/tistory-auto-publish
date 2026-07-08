@@ -1,0 +1,12 @@
+build/
+dist/
+release/
+__pycache__/
+*.pyc
+.venv/
+.env
+data/accounts.txt
+accounts.txt
+*.zip
+*.log
+deleg_test.txt
