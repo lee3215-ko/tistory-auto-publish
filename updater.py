@@ -176,6 +176,30 @@ def get_update_log_path() -> Path:
     return Path(tempfile.gettempdir()) / f"{APP_NAME}_update.log"
 
 
+def get_update_cache_dir() -> Path:
+    """ESTsoft 등 외부 임시폴더 청소를 피하기 위해 LOCALAPPDATA 아래에 저장."""
+    root = Path(os.environ.get("LOCALAPPDATA", tempfile.gettempdir())) / APP_NAME / "updates"
+    root.mkdir(parents=True, exist_ok=True)
+    return root
+
+
+def get_update_zip_path(version: str) -> Path:
+    safe_version = version.strip().replace("/", "_")
+    return get_update_cache_dir() / f"{APP_NAME}-{safe_version}.zip"
+
+
+def get_update_staging_dir(version: str) -> Path:
+    safe_version = version.strip().replace("/", "_")
+    return get_update_cache_dir() / f"staging-{safe_version}"
+
+
+def prepare_update_staging(zip_path: Path, version: str) -> Path:
+    """다운로드 직후 워커 스레드에서 zip을 풀어 메인 스레드 전달 전에 파일을 보존."""
+    validate_zip_file(zip_path, min_bytes=1024 * 1024)
+    staging_dir = get_update_staging_dir(version)
+    return extract_zip_to_staging(zip_path, staging_dir)
+
+
 ProgressCallback = Callable[[int, int], None]
 
 
@@ -432,23 +456,68 @@ def schedule_apply_update(
     exe_name: str,
     zip_inner_folder: str | None = None,
     app_slug: str | None = None,
+    version: str = "",
 ) -> None:
     if not can_auto_update():
         raise RuntimeError("Auto-update works only in packaged exe builds.")
 
     validate_zip_file(zip_path)
-
-    slug = app_slug or APP_NAME
-    target_dir = install_dir or get_install_dir()
-    inner = zip_inner_folder or target_dir.name
-    exe_path = target_dir / exe_name
-    staging_dir = Path(tempfile.gettempdir()) / f"{slug}_staging_{os.getpid()}"
-
+    staging_dir = get_update_staging_dir(version) if version else Path(tempfile.gettempdir()) / f"{app_slug or APP_NAME}_staging_{os.getpid()}"
     try:
         extract_zip_to_staging(zip_path, staging_dir)
     except (zipfile.BadZipFile, OSError) as exc:
         shutil.rmtree(staging_dir, ignore_errors=True)
         raise RuntimeError(f"업데이트 zip 풀기 실패: {exc}") from exc
+
+    _schedule_apply_update_from_staging(
+        staging_dir,
+        install_dir=install_dir,
+        exe_name=exe_name,
+        zip_inner_folder=zip_inner_folder,
+        app_slug=app_slug,
+    )
+
+    try:
+        zip_path.unlink(missing_ok=True)
+    except OSError:
+        pass
+
+
+def schedule_apply_update_from_staging(
+    staging_dir: Path,
+    *,
+    install_dir: Path | None = None,
+    exe_name: str,
+    zip_inner_folder: str | None = None,
+    app_slug: str | None = None,
+) -> None:
+    if not can_auto_update():
+        raise RuntimeError("Auto-update works only in packaged exe builds.")
+
+    if not staging_dir.is_dir():
+        raise FileNotFoundError(f"업데이트 준비 폴더가 없습니다: {staging_dir}")
+
+    _schedule_apply_update_from_staging(
+        staging_dir,
+        install_dir=install_dir,
+        exe_name=exe_name,
+        zip_inner_folder=zip_inner_folder,
+        app_slug=app_slug,
+    )
+
+
+def _schedule_apply_update_from_staging(
+    staging_dir: Path,
+    *,
+    install_dir: Path | None = None,
+    exe_name: str,
+    zip_inner_folder: str | None = None,
+    app_slug: str | None = None,
+) -> None:
+    slug = app_slug or APP_NAME
+    target_dir = install_dir or get_install_dir()
+    inner = zip_inner_folder or target_dir.name
+    exe_path = target_dir / exe_name
 
     script_path = Path(tempfile.gettempdir()) / f"{slug}_update_{os.getpid()}.ps1"
     _write_update_script(script_path)
@@ -476,8 +545,3 @@ def schedule_apply_update(
         creationflags=subprocess.CREATE_NO_WINDOW,
         close_fds=True,
     )
-
-    try:
-        zip_path.unlink(missing_ok=True)
-    except OSError:
-        pass

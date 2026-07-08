@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import os
-import tempfile
 import threading
 import urllib.error
 import webbrowser
@@ -21,7 +20,9 @@ from updater import (
     fetch_version_payload,
     format_network_error,
     get_update_log_path,
-    schedule_apply_update,
+    get_update_zip_path,
+    prepare_update_staging,
+    schedule_apply_update_from_staging,
     validate_zip_file,
 )
 
@@ -31,7 +32,7 @@ class _UpdateSignals(QObject):
 
     show_dialog = Signal(object)
     progress = Signal(int, int)
-    download_done = Signal(str, str)
+    download_done = Signal(str, str, int)
     download_failed = Signal(str)
     check_failed = Signal(str)
     up_to_date = Signal()
@@ -166,22 +167,20 @@ def _auto_update(parent: QWidget, info: UpdateInfo, app_name: str, exe_name: str
         else:
             status.setText("다운로드 중...")
 
-    @Slot(str, str)
-    def on_download_done(zip_path_str: str, used_url: str) -> None:
-        zip_path = Path(zip_path_str)
+    @Slot(str, str, int)
+    def on_download_done(staging_dir_str: str, used_url: str, size_mb: int) -> None:
+        staging_dir = Path(staging_dir_str)
         log_path = get_update_log_path()
         try:
             status.setText("설치 준비 중... 잠시 후 다시 실행됩니다.")
             dialog.repaint()
-            schedule_apply_update(
-                zip_path,
+            schedule_apply_update_from_staging(
+                staging_dir,
                 exe_name=exe_name,
                 zip_inner_folder=zip_inner_folder,
                 app_slug=app_name,
             )
-            log(
-                f"[업데이트] 다운로드 완료 ({zip_path.stat().st_size // 1024 // 1024} MB) via {used_url}"
-            )
+            log(f"[업데이트] 다운로드 완료 ({size_mb} MB) via {used_url}")
             log(f"[업데이트] 설치 스크립트 실행 (로그: {log_path})")
         except (RuntimeError, OSError) as exc:
             QMessageBox.critical(parent, "업데이트 실패", str(exc))
@@ -207,7 +206,7 @@ def _auto_update(parent: QWidget, info: UpdateInfo, app_name: str, exe_name: str
     bridge.download_failed.connect(on_download_failed)
 
     def worker() -> None:
-        zip_path = Path(tempfile.gettempdir()) / f"{app_name}-{info.version}.zip"
+        zip_path = get_update_zip_path(info.version)
         try:
             log(f"[업데이트] 다운로드 시작: {info.version}")
             urls = list(info.download_urls) if info.download_urls else [info.url]
@@ -222,7 +221,9 @@ def _auto_update(parent: QWidget, info: UpdateInfo, app_name: str, exe_name: str
                 on_progress=on_progress_cb,
             )
             validate_zip_file(zip_path, min_bytes=1024 * 1024)
-            bridge.download_done.emit(str(zip_path), used_url)
+            size_mb = zip_path.stat().st_size // 1024 // 1024
+            staging_dir = prepare_update_staging(zip_path, info.version)
+            bridge.download_done.emit(str(staging_dir), used_url, size_mb)
         except (urllib.error.URLError, TimeoutError, OSError, ValueError) as exc:
             bridge.download_failed.emit(format_network_error(exc))
 
