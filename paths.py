@@ -1,4 +1,4 @@
-"""앱 경로·버전·데이터 디렉터리."""
+﻿"""??寃쎈줈쨌踰꾩쟾쨌?곗씠???붾젆?곕━."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ import sys
 from pathlib import Path
 
 APP_NAME = "TistoryPoster"
-APP_VERSION = "2.0.0"
+APP_VERSION = "2.0.1"
 EXE_NAME = "TistoryPoster.exe"
 UPDATE_VERSION_URL = (
     "https://raw.githubusercontent.com/lee3215-ko/tistory-auto-publish/main/version.json"
@@ -71,3 +71,5 @@ def is_admin_mode() -> bool:
 def init_runtime_paths() -> None:
     os.chdir(get_app_dir())
     migrate_legacy_data()
+
+

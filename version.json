@@ -1,6 +1,5 @@
 ﻿{
-  "version": "1.0.0",
-  "url": "https://github.com/lee3215-ko/tistory-auto-publish/releases/latest/download/TistoryPoster.zip",
-  "notes": "泥?諛고룷"
+    "version":  "2.0.1",
+    "url":  "https://github.com/lee3215-ko/tistory-auto-publish/releases/latest/download/TistoryPoster.zip",
+    "notes":  "GUI 개선, 코드 정리, GitHub 자동 업데이트 지원"
 }
-

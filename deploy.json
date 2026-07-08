@@ -9,9 +9,9 @@
     "variable": "APP_VERSION"
   },
   "build": {
-    "script": "build.bat",
+    "script": "build.ps1",
     "dist_dir": "release/TistoryPoster"
   },
-  "git_add": ["README.md", "paths.py", "gui.py", "gui_workers.py", "run_gui.py", "updater.py", "update_ui.py", "ui_theme.py", "build.bat", "build.spec", "requirements.txt", "version.json", "assets", "src", ".gitignore"]
+  "git_add": ["README.md", "paths.py", "gui.py", "gui_workers.py", "run_gui.py", "updater.py", "update_ui.py", "ui_theme.py", "build.ps1", "build.spec", "requirements.txt", "version.json", "assets", "src", ".gitignore"]
 }
 
