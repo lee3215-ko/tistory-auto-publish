@@ -1,5 +1,5 @@
 ﻿{
-    "version":  "2.0.1",
+    "version":  "2.0.2",
     "url":  "https://github.com/lee3215-ko/tistory-auto-publish/releases/latest/download/TistoryPoster.zip",
-    "notes":  "GUI 개선, 코드 정리, GitHub 자동 업데이트 지원"
+    "notes":  "배포 실패 계정 빨간색 표시 및 원고 변경 전 재시도 건너뛰기"
 }

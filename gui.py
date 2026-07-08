@@ -381,7 +381,14 @@ class TistoryPosterApp(QMainWindow):
         for i, acc in enumerate(accounts):
             published_url = getattr(acc, "published_url", "")
             published_at = getattr(acc, "published_at", "")
-            status_item = QTableWidgetItem("✓" if published_url else "")
+            publish_error = getattr(acc, "publish_error", "")
+            if published_url:
+                status_text = "✓"
+            elif publish_error:
+                status_text = "✗"
+            else:
+                status_text = ""
+            status_item = QTableWidgetItem(status_text)
             status_item.setTextAlignment(Qt.AlignCenter)
             self.acc_table.setItem(i, 0, status_item)
             self.acc_table.setItem(i, 1, QTableWidgetItem(acc.id))
@@ -400,11 +407,29 @@ class TistoryPosterApp(QMainWindow):
             self.acc_table.setItem(i, 6, url_item)
             if published_url:
                 self._mark_account_row(i, published_url, published_at)
+            elif publish_error:
+                self._mark_account_row_failed(i, publish_error)
             if prev_id is not None and acc.id != prev_id:
                 self._set_row_separator(i, True)
             prev_id = acc.id
         if accounts:
             self._append_log(f"[계정] {len(accounts)}개 계정 로드 완료")
+
+    def _reset_row_style(self, row: int):
+        for col in range(self.acc_table.columnCount()):
+            item = self.acc_table.item(row, col)
+            if item:
+                item.setBackground(QColor(COLORS["surface"]))
+                item.setForeground(QColor(COLORS["text"]))
+
+    def _clear_publish_failure(self, acc: Account):
+        acc.publish_error = ""
+
+    def _reset_article_publish_state(self, acc: Account):
+        """원고 변경 시 발행·실패 상태를 초기화해 재시도 가능하게 함."""
+        acc.published_url = ""
+        acc.published_at = ""
+        self._clear_publish_failure(acc)
 
     def _add_account(self):
         aid = self.inp_id.text().strip()
@@ -478,6 +503,7 @@ class TistoryPosterApp(QMainWindow):
                     acc.password = new_pw
                     if new_article:
                         acc.article_path = new_article
+                        self._reset_article_publish_state(acc)
                     changed = True
             # 블로그 URL 변경: 기존 계정 삭제 후 새 URL로 재생성
             if new_urls:
@@ -514,8 +540,7 @@ class TistoryPosterApp(QMainWindow):
         for idx, row in enumerate(selected_rows):
             if 0 <= row < len(accounts):
                 accounts[row].article_path = str(txt_files[idx])
-                accounts[row].published_url = ""
-                accounts[row].published_at = ""
+                self._reset_article_publish_state(accounts[row])
         self.acc_mgr.save(accounts)
         self._load_accounts()
         self._append_log(f"[계정] 선택한 {len(selected_rows)}개 계정에 원고 자동 배정 완료 및 발행 상태 초기화 ({folder_path})")
@@ -537,8 +562,7 @@ class TistoryPosterApp(QMainWindow):
         for idx, row in enumerate(selected_rows):
             if 0 <= row < len(accounts):
                 accounts[row].article_path = paths[idx]
-                accounts[row].published_url = ""
-                accounts[row].published_at = ""
+                self._reset_article_publish_state(accounts[row])
         self.acc_mgr.save(accounts)
         self._load_accounts()
         self._append_log(f"[계정] 선택한 {count}개 계정에 원고 지정 완료 및 발행 상태 초기화")
@@ -570,14 +594,29 @@ class TistoryPosterApp(QMainWindow):
             return
         pending_entries = []
         completed_entries = []
+        skipped_failed_entries = []
         for i, acc in enumerate(accounts):
             if getattr(acc, "published_url", ""):
                 completed_entries.append((i, acc))
+            elif getattr(acc, "publish_error", ""):
+                skipped_failed_entries.append((i, acc))
             else:
                 pending_entries.append((i, acc))
         if not pending_entries:
-            QMessageBox.information(self, "완료", "모든 계정이 이미 발행 완료 상태입니다.")
+            if skipped_failed_entries:
+                QMessageBox.information(
+                    self,
+                    "건너뜀",
+                    f"실패한 계정 {len(skipped_failed_entries)}개가 남아 있습니다.\n"
+                    "원고를 변경한 뒤 다시 시도하세요.",
+                )
+            else:
+                QMessageBox.information(self, "완료", "모든 계정이 이미 발행 완료 상태입니다.")
             return
+        if skipped_failed_entries:
+            self._skipped_failed_count = len(skipped_failed_entries)
+        else:
+            self._skipped_failed_count = 0
         pending_accounts = []
         for original_row, acc in pending_entries:
             setattr(acc, "_source_row", original_row)
@@ -593,6 +632,10 @@ class TistoryPosterApp(QMainWindow):
                 return
         self.progress.setValue(0)
         self.log_view.clear()
+        if getattr(self, "_skipped_failed_count", 0):
+            self._append_log(
+                f"[건너뜀] 실패 표시 계정 {self._skipped_failed_count}개 — 원고 변경 전까지 재시도하지 않습니다."
+            )
         self._append_log("[시작] 글 배포를 시작합니다...")
         self._post_worker = PosterWorker(
             accounts=pending_accounts,
@@ -648,11 +691,15 @@ class TistoryPosterApp(QMainWindow):
             if not error and url:
                 acc.published_url = url
                 acc.published_at = published_at or datetime.now().strftime("%Y-%m-%d %H:%M")
+                self._clear_publish_failure(acc)
                 self.acc_mgr.save(accounts)
                 self._load_accounts()
                 self._append_log(f"[계정 완료] #{row+1} → 발행 URL: {acc.published_url}")
             elif error:
-                self._append_log(f"[계정 완료] #{row+1} → 실패: {error}")
+                acc.publish_error = error
+                self.acc_mgr.save(accounts)
+                self._mark_account_row_failed(row, error)
+                self._append_log(f"[계정 실패] #{row+1} → {error}")
 
     def _check_update(self):
         check_update_manual(
@@ -683,8 +730,7 @@ class TistoryPosterApp(QMainWindow):
                 accounts = self.acc_mgr.load()
                 if 0 <= row < len(accounts):
                     accounts[row].article_path = path
-                    accounts[row].published_url = ""
-                    accounts[row].published_at = ""
+                    self._reset_article_publish_state(accounts[row])
                     self.acc_mgr.save(accounts)
                     self._load_accounts()
                     self._append_log(f"[계정] #{row+1} 원고 변경 및 발행 상태 초기화: {path}")
@@ -702,13 +748,9 @@ class TistoryPosterApp(QMainWindow):
     def _reset_publish_status(self, row):
         accounts = self.acc_mgr.load()
         if 0 <= row < len(accounts):
-            accounts[row].published_url = ""
-            accounts[row].published_at = ""
+            self._reset_article_publish_state(accounts[row])
             self.acc_mgr.save(accounts)
-        for col in range(self.acc_table.columnCount()):
-            item = self.acc_table.item(row, col)
-            if item:
-                item.setBackground(QColor(255, 255, 255))
+        self._reset_row_style(row)
         status_item = self.acc_table.item(row, 0)
         if status_item:
             status_item.setText("")
@@ -724,9 +766,10 @@ class TistoryPosterApp(QMainWindow):
         accounts = self.acc_mgr.load()
         changed = False
         for acc in accounts:
-            if getattr(acc, "published_url", ""):
+            if getattr(acc, "published_url", "") or getattr(acc, "publish_error", ""):
                 acc.published_url = ""
                 acc.published_at = ""
+                acc.publish_error = ""
                 changed = True
         if changed:
             self.acc_mgr.save(accounts)
@@ -755,6 +798,25 @@ class TistoryPosterApp(QMainWindow):
                 if self._copy_selected_urls():
                     return True
         return super().eventFilter(watched, event)
+
+    def _mark_account_row_failed(self, row: int, error: str = ""):
+        red = QColor(COLORS["row_failed"])
+        for col in range(self.acc_table.columnCount()):
+            item = self.acc_table.item(row, col)
+            if item:
+                item.setBackground(red)
+        status_item = self.acc_table.item(row, 0) or QTableWidgetItem()
+        status_item.setText("✗")
+        status_item.setTextAlignment(Qt.AlignCenter)
+        status_item.setBackground(red)
+        status_item.setForeground(QColor(COLORS["danger"]))
+        status_item.setToolTip(error)
+        self.acc_table.setItem(row, 0, status_item)
+        url_item = self.acc_table.item(row, 6) or QTableWidgetItem()
+        if error:
+            url_item.setToolTip(error)
+        url_item.setBackground(red)
+        self.acc_table.setItem(row, 6, url_item)
 
     def _mark_account_row(self, row: int, published_url: str = "", published_at: str = ""):
         blue = QColor(COLORS["row_done"])

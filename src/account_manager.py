@@ -19,6 +19,7 @@ class Account:
     article_path: str = ""
     published_url: str = ""
     published_at: str = ""
+    publish_error: str = ""
 
     @classmethod
     def from_line(cls, line: str) -> "Account | None":
@@ -28,6 +29,7 @@ class Account:
             article_path = parts[3] if len(parts) >= 4 else ""
             published_url = parts[4] if len(parts) >= 5 else ""
             published_at = parts[5] if len(parts) >= 6 else ""
+            publish_error = parts[6] if len(parts) >= 7 else ""
             if "/manage/" in published_url:
                 published_url = ""
             return cls(
@@ -37,13 +39,22 @@ class Account:
                 article_path=article_path,
                 published_url=published_url,
                 published_at=published_at,
+                publish_error=publish_error,
             )
         return None
 
     def to_line(self) -> str:
         output = io.StringIO()
         writer = csv.writer(output, lineterminator="")
-        writer.writerow([self.id, self.password, self.blog_url, self.article_path, self.published_url, self.published_at])
+        writer.writerow([
+            self.id,
+            self.password,
+            self.blog_url,
+            self.article_path,
+            self.published_url,
+            self.published_at,
+            self.publish_error,
+        ])
         return output.getvalue()
 
 
@@ -68,7 +79,7 @@ class AccountManager:
 
     def save(self, accounts: List[Account]):
         with self.filepath.open("w", encoding="utf-8") as f:
-            f.write("# id,password,blog_url,article_path,published_url,published_at\n")
+            f.write("# id,password,blog_url,article_path,published_url,published_at,publish_error\n")
             for acc in accounts:
                 f.write(acc.to_line() + "\n")
 

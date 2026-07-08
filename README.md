@@ -22,8 +22,8 @@ python run_gui.py
 
 ## 배포 빌드
 
-```bat
-build.bat
+```powershell
+.\build.ps1
 ```
 
 빌드 결과: `release\TistoryPoster\` 폴더 (`TistoryPoster.exe` 포함)

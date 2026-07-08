@@ -20,6 +20,7 @@ COLORS = {
     "accent": "#7c3aed",
     "header": "#1e3a5f",
     "row_done": "#dbeafe",
+    "row_failed": "#fecaca",
     "row_alt": "#f8fafc",
 }
 
