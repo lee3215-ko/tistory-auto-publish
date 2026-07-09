@@ -28,7 +28,18 @@ $launcher = Join-Path $release "run.bat"
 @(
     "@echo off",
     "cd /d `"%~dp0`"",
-    'start "" "TistoryPoster.exe"'
-) | Set-Content -Path $launcher -Encoding ASCII
+    "powershell -NoProfile -ExecutionPolicy Bypass -Command ""Get-ChildItem -LiteralPath '%~dp0' -Recurse -File | Unblock-File -ErrorAction SilentlyContinue""",
+    'start "" "%~dp0TistoryPoster.exe"'
+) | Out-File -FilePath $launcher -Encoding ascii
+
+$installBat = Join-Path $release "install.bat"
+@(
+    "@echo off",
+    "cd /d `"%~dp0`"",
+    "powershell -NoProfile -ExecutionPolicy Bypass -File `"%~dp0install.ps1`"",
+    "if errorlevel 1 pause"
+) | Out-File -FilePath $installBat -Encoding ascii
+
+Copy-Item -Path (Join-Path $PSScriptRoot "scripts\install-client.ps1") -Destination (Join-Path $release "install.ps1") -Force
 
 Write-Host "Build complete: $release"

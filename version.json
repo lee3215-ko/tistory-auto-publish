@@ -1,5 +1,5 @@
 ﻿{
-    "version":  "2.0.8",
+    "version":  "2.0.10",
     "url":  "https://github.com/lee3215-ko/tistory-auto-publish/releases/latest/download/TistoryPoster.zip",
-    "notes":  "exe 크래시 수정(업데이트 로그 스레드 안전), 실행 로그 탭 분리, 계정 관리 테이블 높이 확대"
+    "notes":  "계정 목록/입력 폼 분리, 원고 해시태그 자동 입력, 이미지 대체텍스트(제목) 자동 설정, install.bat 추가"
 }

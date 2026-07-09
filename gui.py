@@ -157,23 +157,22 @@ class TistoryPosterApp(QMainWindow):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(12)
 
-        # === 상단: 계정 관리 ===
-        acc_group = QGroupBox("계정 관리")
-        acc_v = QVBoxLayout(acc_group)
+        # === 계정 목록 (테이블만) ===
+        list_group = QGroupBox("계정 목록")
+        list_v = QVBoxLayout(list_group)
 
-        # 검색칸
         search_h = QHBoxLayout()
         self.inp_search_id = QLineEdit()
         self.inp_search_id.setPlaceholderText("아이디 검색...")
         self.inp_search_id.textChanged.connect(self._filter_accounts)
         search_h.addWidget(QLabel("검색"))
         search_h.addWidget(self.inp_search_id, stretch=1)
-        acc_v.addLayout(search_h)
+        list_v.addLayout(search_h)
 
         self.acc_table = QTableWidget()
         self.acc_table.setColumnCount(7)
         self.acc_table.setHorizontalHeaderLabels(["상태", "아이디", "비밀번호", "블로그 주소", "원고 파일", "완료일시", "발행 URL"])
-        self.acc_table.setMinimumHeight(640)
+        self.acc_table.setMinimumHeight(380)
         self.acc_table.horizontalHeader().setSectionResizeMode(QHeaderView.Interactive)
         self.acc_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
         self.acc_table.setColumnWidth(1, 230)
@@ -188,7 +187,14 @@ class TistoryPosterApp(QMainWindow):
         self.acc_table.cellDoubleClicked.connect(self._open_published_url)
         self.acc_table.setItemDelegate(GroupSeparatorDelegate(self.acc_table))
         self.acc_table.installEventFilter(self)
-        acc_v.addWidget(self.acc_table, stretch=1)
+        list_v.addWidget(self.acc_table, stretch=1)
+
+        layout.addWidget(list_group, stretch=1)
+
+        # === 계정 입력 (목록과 분리) ===
+        input_group = QGroupBox("계정 추가 · 수정")
+        input_group.setMaximumHeight(220)
+        input_v = QVBoxLayout(input_group)
 
         acc_form = QHBoxLayout()
         self.inp_id = QLineEdit()
@@ -230,9 +236,9 @@ class TistoryPosterApp(QMainWindow):
         acc_form.addWidget(btn_update_selected)
         acc_form.addWidget(btn_add)
         acc_form.addWidget(btn_del)
-        acc_v.addLayout(acc_form)
+        input_v.addLayout(acc_form)
 
-        layout.addWidget(acc_group, stretch=10)
+        layout.addWidget(input_group, stretch=0)
 
         settings_group = QGroupBox("배포 설정")
         settings_v = QVBoxLayout(settings_group)

@@ -8,6 +8,8 @@ from pathlib import Path
 
 from PySide6.QtCore import QThread, Signal
 
+from src.article_parser import parse_article
+
 
 class VelogLoginWorker(QThread):
     log_signal = Signal(str)
@@ -157,11 +159,17 @@ class PosterWorker(QThread):
                     p = Path(article_path)
                     if not p.exists():
                         raise RuntimeError(f"원고 파일이 존재하지 않습니다: {p}")
-                    lines = p.read_text(encoding="utf-8").splitlines()
-                    article_title = lines[0].strip() if lines else "무제"
-                    article_content = p.read_text(encoding="utf-8")
+                    parts = parse_article(p.read_text(encoding="utf-8"))
+                    if parts.tags:
+                        self._append_log(f"  → 태그 {len(parts.tags)}개 인식: {', '.join(parts.tags)}")
                     url = poster.post(
-                        acc.blog_url, acc.id, acc.password, article_title, article_content, img
+                        acc.blog_url,
+                        acc.id,
+                        acc.password,
+                        parts.title,
+                        parts.body,
+                        img,
+                        tags=parts.tags,
                     )
                     if not url:
                         raise RuntimeError(

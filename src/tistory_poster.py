@@ -77,9 +77,11 @@ class TistoryPoster:
             raise RuntimeError(f"페이지가 about:blank — 이동 실패: {url}")
 
     def post(self, blog_url: str, user_id: str, password: str,
-             title: str, content: str, image_path=None, stop_signal=None, skip_login=False):
+             title: str, content: str, image_path=None, tags=None, stop_signal=None, skip_login=False):
         if stop_signal is None:
             stop_signal = {}
+        if tags is None:
+            tags = []
 
         def stopped():
             return bool(stop_signal.get("stop"))
@@ -119,6 +121,10 @@ class TistoryPoster:
         self._log("[5/7] 내용 입력...")
         self._fill_content(content)
         self._log("[5/7] 내용 완료")
+        if tags:
+            self._log("[5/7] 태그 입력...")
+            self._fill_tags(tags)
+            self._log(f"[5/7] 태그 입력 완료 ({len(tags)}개)")
         if image_path and os.path.exists(image_path):
             self._log("[5/7] 기본모드 전환...")
             self._switch_basic_mode()
@@ -129,6 +135,9 @@ class TistoryPoster:
             self._log("[5/7] 대표 이미지 설정...")
             self._set_represent_image()
             self._log("[5/7] 대표 이미지 설정 완료")
+            self._log("[5/7] 대체 텍스트 입력...")
+            self._set_image_alt_text(title)
+            self._log("[5/7] 대체 텍스트 입력 완료")
         if stopped():
             return
 
@@ -635,6 +644,87 @@ class TistoryPoster:
         if res.get("length", 0) <= 0:
             raise RuntimeError("원고 내용 입력 실패 — 에디터에 내용이 들어가지 않았습니다.")
         time.sleep(1)
+
+    def _fill_tags(self, tags: list[str]):
+        if not tags:
+            return
+        page = self.page
+        tag_input = page.locator("#tagText, input[name='tagText']").first
+        tag_input.wait_for(state="visible", timeout=10_000)
+        tag_input.click(timeout=5_000)
+        time.sleep(0.3)
+        for index, tag in enumerate(tags):
+            clean = (tag or "").strip().lstrip("#")
+            if not clean:
+                continue
+            tag_input.fill(clean, timeout=5_000)
+            time.sleep(0.2)
+            tag_input.press("Enter")
+            self._log(f"  → 태그 입력 ({index + 1}/{len(tags)}): {clean}")
+            time.sleep(0.35)
+
+    def _set_image_alt_text(self, alt_text: str):
+        page = self.page
+        alt_text = (alt_text or "").strip()
+        if not alt_text:
+            self._log("  → 대체 텍스트 생략 (제목 없음)")
+            return
+
+        self._log("  → 이미지 선택 후 대체 텍스트 메뉴 열기")
+        for _ in range(30):
+            try:
+                clicked = page.evaluate(
+                    """
+                    () => {
+                        const visible = el => {
+                            const style = getComputedStyle(el);
+                            const rect = el.getBoundingClientRect();
+                            return style.display !== 'none' && style.visibility !== 'hidden' &&
+                                   rect.width > 0 && rect.height > 0;
+                        };
+
+                        const images = Array.from(document.querySelectorAll('.mce-content-body img, img'))
+                            .filter(visible);
+                        const image = images[0];
+                        if (!image) return false;
+                        image.scrollIntoView({ block: 'center', inline: 'center' });
+                        image.click();
+                        return true;
+                    }
+                    """
+                )
+                if not clicked:
+                    time.sleep(0.4)
+                    continue
+
+                time.sleep(0.8)
+                alt_btn = page.locator(
+                    'button[aria-label="대체 텍스트 삽입"], button:has(.mce-i-alt)'
+                ).first
+                if alt_btn.count() == 0:
+                    time.sleep(0.4)
+                    continue
+                alt_btn.click(timeout=3_000)
+                time.sleep(0.6)
+
+                dialog_input = page.locator(
+                    ".mce-window input[type='text'], .mce-textbox, .mce-container-body input"
+                ).last
+                dialog_input.wait_for(state="visible", timeout=5_000)
+                dialog_input.fill(alt_text, timeout=5_000)
+                time.sleep(0.3)
+
+                confirm = page.locator(
+                    ".mce-window button:has-text('확인'), .mce-primary button:has-text('확인'), button:has-text('확인')"
+                ).last
+                confirm.click(timeout=5_000)
+                self._log(f"  → 대체 텍스트 입력 완료: {alt_text}")
+                time.sleep(0.8)
+                return
+            except Exception:
+                time.sleep(0.4)
+
+        raise RuntimeError("대체 텍스트 입력 실패 — 이미지 툴바 또는 확인 버튼을 찾지 못했습니다.")
 
     def _upload_image(self, path):
         page = self.page
