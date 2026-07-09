@@ -8,7 +8,7 @@ import sys
 from pathlib import Path
 
 APP_NAME = "TistoryPoster"
-APP_VERSION = "2.0.11"
+APP_VERSION = "2.0.12"
 EXE_NAME = "TistoryPoster.exe"
 UPDATE_VERSION_URL = (
     "https://raw.githubusercontent.com/lee3215-ko/tistory-auto-publish/main/version.json"
@@ -71,6 +71,7 @@ def is_admin_mode() -> bool:
 def init_runtime_paths() -> None:
     os.chdir(get_app_dir())
     migrate_legacy_data()
+
 
 
 

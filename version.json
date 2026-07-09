@@ -1,5 +1,5 @@
 ﻿{
-    "version":  "2.0.11",
+    "version":  "2.0.12",
     "url":  "https://github.com/lee3215-ko/tistory-auto-publish/releases/latest/download/TistoryPoster.zip",
-    "notes":  "대체 텍스트 입력 수정 — 인라인 이미지 툴바(mce-floatpanel) 버튼 인식 개선"
+    "notes":  "대체 텍스트 입력 수정 — keditor-image-alt-panel textarea.kimage-alt 인식"
 }
