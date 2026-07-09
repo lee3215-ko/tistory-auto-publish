@@ -1,5 +1,5 @@
 ﻿{
-    "version":  "2.0.12",
+    "version":  "2.0.13",
     "url":  "https://github.com/lee3215-ko/tistory-auto-publish/releases/latest/download/TistoryPoster.zip",
-    "notes":  "대체 텍스트 입력 수정 — keditor-image-alt-panel textarea.kimage-alt 인식"
+    "notes":  "v2.0.12 재배포 (대체 텍스트 keditor 패널 적용)"
 }
