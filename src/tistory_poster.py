@@ -670,61 +670,154 @@ class TistoryPoster:
             self._log("  → 대체 텍스트 생략 (제목 없음)")
             return
 
-        self._log("  → 이미지 선택 후 대체 텍스트 메뉴 열기")
-        for _ in range(30):
+        self._log("  → 인라인 이미지 툴바에서 대체 텍스트 버튼 탐색")
+        time.sleep(1.0)
+        last_error = None
+
+        for attempt in range(40):
             try:
-                clicked = page.evaluate(
+                result = page.evaluate(
                     """
                     () => {
                         const visible = el => {
+                            if (!el) return false;
                             const style = getComputedStyle(el);
                             const rect = el.getBoundingClientRect();
                             return style.display !== 'none' && style.visibility !== 'hidden' &&
                                    rect.width > 0 && rect.height > 0;
                         };
+                        const toBox = el => {
+                            const target = el.closest('[role="button"]') || el.closest('button') || el;
+                            const rect = target.getBoundingClientRect();
+                            if (rect.width <= 0 || rect.height <= 0) return null;
+                            return {
+                                x: rect.x,
+                                y: rect.y,
+                                width: rect.width,
+                                height: rect.height,
+                            };
+                        };
+                        const findAltButton = () => {
+                            const roots = Array.from(document.querySelectorAll(
+                                '.mce-floatpanel.mce-tinymce-inline, .mce-tinymce-inline.mce-floatpanel, [aria-label="Inline toolbar"]'
+                            )).filter(visible);
+                            const scopes = roots.length ? roots : [document];
+                            for (const scope of scopes) {
+                                const candidates = Array.from(scope.querySelectorAll(
+                                    '[aria-label="대체 텍스트 삽입"], .mce-i-alt'
+                                ));
+                                for (const candidate of candidates) {
+                                    const box = toBox(candidate);
+                                    if (box) return box;
+                                }
+                            }
+                            return null;
+                        };
 
-                        const images = Array.from(document.querySelectorAll('.mce-content-body img, img'))
-                            .filter(visible);
-                        const image = images[0];
-                        if (!image) return false;
+                        const altBox = findAltButton();
+                        if (altBox) {
+                            return { action: 'alt-button', box: altBox };
+                        }
+
+                        const images = Array.from(document.querySelectorAll(
+                            '.mce-content-body img, #tinymce img, .mce-edit-area img, img'
+                        )).filter(visible);
+                        const image = images.find(img => img.closest('.mce-content-body, #tinymce, .mce-edit-area')) || images[0];
+                        if (!image) {
+                            return { action: 'none', reason: 'no-image' };
+                        }
                         image.scrollIntoView({ block: 'center', inline: 'center' });
-                        image.click();
-                        return true;
+                        const rect = image.getBoundingClientRect();
+                        return {
+                            action: 'click-image',
+                            box: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
+                        };
                     }
                     """
                 )
-                if not clicked:
+                action = result.get("action")
+                box = result.get("box")
+                if action == "none":
                     time.sleep(0.4)
                     continue
 
-                time.sleep(0.8)
-                alt_btn = page.locator(
-                    'button[aria-label="대체 텍스트 삽입"], button:has(.mce-i-alt)'
-                ).first
-                if alt_btn.count() == 0:
+                if not box:
                     time.sleep(0.4)
                     continue
-                alt_btn.click(timeout=3_000)
-                time.sleep(0.6)
+
+                page.mouse.click(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
+                if action == "click-image":
+                    if attempt % 5 == 0:
+                        self._log("  → 이미지 클릭 (인라인 툴바 표시 대기)")
+                    time.sleep(0.7)
+                    continue
+
+                self._log("  → 대체 텍스트 삽입 버튼 클릭")
+                time.sleep(0.7)
+
+                dialog_done = page.evaluate(
+                    """
+                    (altText) => {
+                        const visible = el => {
+                            if (!el) return false;
+                            const style = getComputedStyle(el);
+                            const rect = el.getBoundingClientRect();
+                            return style.display !== 'none' && style.visibility !== 'hidden' &&
+                                   rect.width > 0 && rect.height > 0;
+                        };
+                        const windows = Array.from(document.querySelectorAll('.mce-window, .mce-floatpanel'))
+                            .filter(visible);
+                        for (const win of windows) {
+                            const input = win.querySelector(
+                                'input[type="text"], input.mce-textbox, .mce-textbox input, .mce-container-body input'
+                            );
+                            if (!input) continue;
+                            input.focus();
+                            input.value = altText;
+                            input.dispatchEvent(new Event('input', { bubbles: true }));
+                            input.dispatchEvent(new Event('change', { bubbles: true }));
+
+                            const buttons = Array.from(win.querySelectorAll('button, [role="button"], .mce-btn'));
+                            const confirm = buttons.find(btn => {
+                                const text = (btn.innerText || btn.textContent || '').trim();
+                                return visible(btn) && text.includes('확인');
+                            });
+                            if (confirm) {
+                                confirm.click();
+                                return true;
+                            }
+                        }
+                        return false;
+                    }
+                    """,
+                    alt_text,
+                )
+                if dialog_done:
+                    self._log(f"  → 대체 텍스트 입력 완료: {alt_text}")
+                    time.sleep(0.8)
+                    return
 
                 dialog_input = page.locator(
-                    ".mce-window input[type='text'], .mce-textbox, .mce-container-body input"
+                    ".mce-window input[type='text'], .mce-floatpanel input[type='text'], .mce-textbox input"
                 ).last
-                dialog_input.wait_for(state="visible", timeout=5_000)
+                dialog_input.wait_for(state="visible", timeout=4_000)
                 dialog_input.fill(alt_text, timeout=5_000)
                 time.sleep(0.3)
-
-                confirm = page.locator(
-                    ".mce-window button:has-text('확인'), .mce-primary button:has-text('확인'), button:has-text('확인')"
-                ).last
-                confirm.click(timeout=5_000)
+                page.locator(
+                    ".mce-window button:has-text('확인'), .mce-floatpanel button:has-text('확인'), "
+                    ".mce-window .mce-primary button, [role='button']:has-text('확인')"
+                ).last.click(timeout=5_000)
                 self._log(f"  → 대체 텍스트 입력 완료: {alt_text}")
                 time.sleep(0.8)
                 return
-            except Exception:
+            except Exception as exc:
+                last_error = exc
                 time.sleep(0.4)
 
-        raise RuntimeError("대체 텍스트 입력 실패 — 이미지 툴바 또는 확인 버튼을 찾지 못했습니다.")
+        detail = f" ({last_error})" if last_error else ""
+        raise RuntimeError(
+            "대체 텍스트 입력 실패 — 인라인 이미지 툴바 또는 확인 버튼을 찾지 못했습니다." + detail
+        )
 
     def _upload_image(self, path):
         page = self.page
